@@ -20,16 +20,14 @@ SYNC = "dcc023c2"  # sync header field "dc c0 23 c2"
 TIMEOUT = 1.0  # timeout in seconds before send same packet again
 MAX_ATTEMPTS = 15
 
-MTU = 2 ** 16  # max bytes size for packet
+MTU = 2 ** 16 - 1  # max bytes size for packet
 
 """
 | ===================================================================
 | Logging setup
 | ===================================================================
 """
-logging.basicConfig(level=logging.DEBUG,
-                    format="[%(asctime)s][%(levelname)s]: %(message)s",
-                    datefmt="%m-%d-%Y %I:%M:%S %p")
+logging.basicConfig(level=logging.DEBUG, format="[%(asctime)s][%(levelname)s]: %(message)s", datefmt="%m-%d-%Y %I:%M:%S %p")
 
 """
 | ===================================================================
@@ -124,7 +122,6 @@ def watcher(sock, input_fh, output_fh, active=False):
     recv_attempts = 0  # Attempts of receiving a packet
     send_no_more = False
     recv_no_more = False
-    end_transmission = False  # Indicates of peers are exchanging data
 
     prev_header_field = 0  # Header field num we are looking for
     prev_state = 0  # Byte position inside header field
@@ -146,8 +143,9 @@ def watcher(sock, input_fh, output_fh, active=False):
         last_sent["length"] = len(prev_buffer)
         last_sent["checksum"], header = pack(last_sent)
         last_sent["packet"] = header + last_sent["data"]
+        prev_buffer = ""
 
-        # Try to send the packet
+        # Try to send first packet
         while True:
             # sock.settimeout(TIMEOUT)
             try:
@@ -159,12 +157,12 @@ def watcher(sock, input_fh, output_fh, active=False):
                                                                                             last_sent["flags"]))
                 break
             except socket.timeout:
-                pass
-
-        prev_buffer = ""
+                continue
 
     # Common behavior for both active and passive calls
     while True:
+
+        # Receive bytes from network and try to make a packet of them
         while prev_header_field < 7:
             # sock.settimeout(TIMEOUT)
             try:
@@ -233,9 +231,7 @@ def watcher(sock, input_fh, output_fh, active=False):
                         prev_state = 0
                         break
             except socket.timeout:
-                recv_attempts += 1
-                if recv_attempts == MAX_ATTEMPTS:
-                    raise socket.timeout
+                continue
             except ValueError:  # flags protected bits violation
                 logging.error("Invalid packet flags! First 5 bits are protected.")
 
@@ -243,8 +239,6 @@ def watcher(sock, input_fh, output_fh, active=False):
                 prev_header_field = 0
                 prev_state = 0
                 prev_buffer = ""
-
-        logging.info("[RECV]: [Checksum: {}][Length: {}][ID: {}][Flags: {}]".format(recv_checksum, recv_length, recv_id, recv_flags))
 
         # Now we validate the checksum before processing the packet
         valid_checksum, packet = pack({"packet": None,
@@ -258,12 +252,10 @@ def watcher(sock, input_fh, output_fh, active=False):
 
             # Wrong ACK format
             if recv_flags & 0x80 and recv_length != 0:
-                logging.error("ACK flags 0x80 present but length is not equal to zero.")
-
-                # Drop the packet and restart process
-                prev_buffer = ""
-                prev_header_field = 0
-                prev_state = 0
+                logging.error("[RECV]: [Checksum: {}][Length: {}][ID: {}][Flags: {}]. WRONG ACK FORMAT".format(recv_checksum,
+                                                                                                               recv_length,
+                                                                                                               recv_id,
+                                                                                                               recv_flags))
 
             # Correct ACK format
             elif recv_length == 0:
@@ -288,8 +280,10 @@ def watcher(sock, input_fh, output_fh, active=False):
                     last_sent["flags"] = 0x80
                     last_sent["id"] ^= recv_id
                     last_sent["length"] = len(last_sent["data"])
-                    last_sent["checksum"], header = pack(last_sent)
-                    last_sent["packet"] = header + last_sent["data"]
+                    last_sent["checksum"] = recv_checksum
+                    last_sent["packet"] = pack(last_sent)[1] + last_sent["data"]
+
+                    logging.info("[RECV]: [Checksum: {}][Length: {}][ID: {}][Flags: {}].".format(recv_checksum, recv_length, recv_id, recv_flags))
 
                     # Try to send the packet
                     while True:
@@ -303,23 +297,24 @@ def watcher(sock, input_fh, output_fh, active=False):
                                                                                                         last_sent["flags"]))
                             break
                         except socket.timeout:
-                            pass
+                            continue
 
                     # At the end Keeps track of last received packet
-                    last_recv = {"packet": packet, "checksum": recv_checksum, "length": recv_length, "id": recv_id, "data": prev_buffer}
-
-                    # Restart process
-                    prev_buffer = ""
-                    prev_header_field = 0
-                    prev_state = 0
+                    last_recv = {"packet": packet,
+                                 "checksum": recv_checksum,
+                                 "length": recv_length,
+                                 "id": recv_id,
+                                 "data": prev_buffer}
 
                 # Repeated ACK - Maybe peer didn't received confirmation
                 elif recv_id == last_recv["id"] and recv_checksum == last_recv["checksum"]:
                     logging.warning("An error probably ocurred, I've received this ACK yet. Retransmitting...")
 
+                    logging.info("[RECV]: [Checksum: {}][Length: {}][ID: {}][Flags: {}].".format(recv_checksum, recv_length, recv_id, recv_flags))
+
                     # Try to send the packet
+                    # sock.settimeout(TIMEOUT)
                     while True:
-                        # sock.settimeout(TIMEOUT)
                         try:
                             sock.send(last_sent["packet"])
                             # sock.settimeout(None)
@@ -329,12 +324,7 @@ def watcher(sock, input_fh, output_fh, active=False):
                                                                                                         last_sent["flags"]))
                             break
                         except socket.timeout:
-                            pass
-
-                    # Restart process
-                    prev_buffer = ""
-                    prev_header_field = 0
-                    prev_state = 0
+                            continue
 
             # Just some data, lets send an ACK
             else:
@@ -344,12 +334,14 @@ def watcher(sock, input_fh, output_fh, active=False):
                 last_sent["flags"] = 0x80
                 last_sent["id"] = recv_id
                 last_sent["length"] = 0
-                last_sent["checksum"], header = pack(last_sent)
-                last_sent["packet"] = header
+                last_sent["checksum"] = recv_checksum
+                last_sent["packet"] = pack(last_sent)[1]
+
+                logging.info("[RECV]: [Checksum: {}][Length: {}][ID: {}][Flags: {}].".format(recv_checksum, recv_length, recv_id, recv_flags))
 
                 # Try to send the packet
+                # sock.settimeout(TIMEOUT)
                 while True:
-                    # sock.settimeout(TIMEOUT)
                     try:
                         sock.send(last_sent["packet"])
                         # sock.settimeout(None)
@@ -359,21 +351,16 @@ def watcher(sock, input_fh, output_fh, active=False):
                                                                                                     last_sent["flags"]))
                         break
                     except socket.timeout:
-                        pass
-
-                # Restart process
-                prev_buffer = ""
-                prev_header_field = 0
-                prev_state = 0
+                        continue
 
         else:
             logging.error("Wrong checksum field value! Dropping the packet.")
-            prev_header_field = 0
-            prev_state = 0
-            prev_buffer = ""
 
-        end_transmission = send_no_more and recv_no_more
-        if not end_transmission:
+        # Clear tmp values and restart process
+        prev_buffer = ""
+        prev_header_field = 0
+        prev_state = 0
+
+        if recv_no_more and send_no_more:
             break
-
     logging.info("End of transmission!")

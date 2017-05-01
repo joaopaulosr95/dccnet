@@ -96,8 +96,8 @@ if __name__ == "__main__":
 
         # Through this we can watch network for packets. This is a mutual behavior from senders and reveivers
         watcher(client_sock, input_fh, output_fh)
-        logging.info("Closing connection with client {}:{}".format(active_host, active_port))
 
+        logging.info("Closing connection with client {}:{}".format(active_host, active_port))
         client_sock.close()
 
     logging.info("Closing socket at {}:{}".format(passive_host, passive_port))
