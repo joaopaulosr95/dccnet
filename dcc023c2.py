@@ -20,13 +20,10 @@ from util import *
 | ===================================================================
 | Main program
 | ===================================================================
-| Here we go with a full-duplex DCCNET program to transmit and 
-| receive data simultaneously
+| Here we run a full-duplex DCCNET demo to transmit and receive data
 """
 
 if __name__ == "__main__":
-
-    max_conn = 1  # max connections our program can handle
 
     # Lets check if the CLI parameters are as expected
     try:
@@ -48,7 +45,7 @@ if __name__ == "__main__":
 
         # Option not recornized
         else:
-            raise IndexError
+            IndexError
     except IndexError:
         helper()
 
@@ -67,42 +64,50 @@ if __name__ == "__main__":
     dcc_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
     """
-    Lets (finally) start playing. First the program will open input 
-    and output files. Based on behavior flag provided by user we now
-    define if this program is gonna make the first move or not.
+    Lets (finally) start playing. First the program will open input and output files. 
+    Based on behavior flag provided by user we now define if this program is gonna 
+    make the first move or not.
     """
+    attempts = 0
+
     if behavior == "active":
         dcc_sock.connect((passive_host, passive_port))
+        dcc_sock.settimeout(None)
         logging.info("Connected to host {}:{}".format(passive_host, passive_port))
 
-        # Through this we can watch network for packets. This is a mutual behavior from senders and reveiver
-        watcher(dcc_sock, input_fh, output_fh, True)
+        dccnet_service(dcc_sock, input_fh, output_fh, True)
 
         logging.info("Closing connection with server {}:{}".format(passive_host, passive_port))
-
     else:
+
         # Tells OS that sock is now hearing at host:port
         dcc_sock.bind((passive_host, passive_port))
         logging.info("Socket binded at {}:{}".format(passive_host, passive_port))
 
         # Tells how many connections our server will handle at once
-        dcc_sock.listen(max_conn)
-        logging.info("Waiting for connections (max. {})".format(max_conn))
+        dcc_sock.listen(MAX_CONN)
 
-        # Lets connect to our first client
-        client_sock, addr = dcc_sock.accept()
-        active_host, active_port = addr[0], addr[1]
-        logging.info("Connection established with {}:{}. Waiting for message...".format(active_host, active_port))
+        while True:
+            logging.info("Waiting for connections (max. {})".format(MAX_CONN))
 
-        # Through this we can watch network for packets. This is a mutual behavior from senders and reveivers
-        watcher(client_sock, input_fh, output_fh)
+            # Lets connect to our first client
+            try:
+                client_sock, client_addr = dcc_sock.accept()
+                dcc_sock.settimeout(None)
+                logging.info("Connection established with {}:{}. Waiting for message...".format(
+                    client_addr[0], client_addr[1]))
 
-        logging.info("Closing connection with client {}:{}".format(active_host, active_port))
-        client_sock.close()
+                dccnet_service(client_sock, input_fh, output_fh)
+            except socket.error as e:
+                if e.errno == 10053:
+                    break
+                else:
+                    logging.error("{}: {}".format(e.errno, e.strerror))
+            finally:
+                logging.info("Closing connection with client {}:{}".format(client_addr[0], client_addr[1]))
+                client_sock.close()
 
     logging.info("Closing socket at {}:{}".format(passive_host, passive_port))
     dcc_sock.close()
-
-    # End of program
     input_fh.close()
-    output_fh.close()
+    output_fh.close()  # End of program
