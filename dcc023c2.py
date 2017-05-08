@@ -72,7 +72,6 @@ if __name__ == "__main__":
 
     if behavior == "active":
         dcc_sock.connect((passive_host, passive_port))
-        dcc_sock.settimeout(None)
         logging.info("Connected to host {}:{}".format(passive_host, passive_port))
 
         dccnet_service(dcc_sock, input_fh, output_fh, True)
@@ -99,10 +98,7 @@ if __name__ == "__main__":
 
                 dccnet_service(client_sock, input_fh, output_fh)
             except socket.error as e:
-                if e.errno == 10053:
-                    break
-                else:
-                    logging.error("{}: {}".format(e.errno, e.strerror))
+                logging.error("Incomplete transmission!")
             finally:
                 logging.info("Closing connection with client {}:{}".format(client_addr[0], client_addr[1]))
                 client_sock.close()

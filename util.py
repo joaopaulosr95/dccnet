@@ -18,7 +18,7 @@ import time
 MAX_CONN = 1  # max connections our program can handle
 TIMEOUT = 1.0  # timeout in seconds before send same packet again
 MAX_ATTEMPTS = 10
-MTU = 2 ** 16 - 1  # max bytes size for packet
+MTU = 2 ** 10 - 1  # max bytes size for packet
 HEADER_FORMAT = "!LLHHBB"  # byte format string for a header to be packed
 SYNC = "dcc023c2"  # sync header field "dc c0 23 c2"
 
@@ -113,13 +113,36 @@ def pack(packet):
 def interact(sock, packet=None):
     while True:
         sock.send(packet)
+
+        """
+        Duvida na especificacao
+        
+        Cliente envia dados
+        Servidor envia ACK
+        Cliente agora envia novos dados ou servidor envia ACK + dados do input_servidor?
+        
+        Duvida montagem ACK
+            Id recebido
+            Data = ""
+            ACK CALCULA CHECKSUM PARA SI E NAO REPETE O DO PACOTE DE DADOS RECEBIDO
+            length = 0 ou recv_length?
+            Checksum sempre é 31229 ou 31230 (não sei se estou recebendo errado ou se estou montando errado o pacote ack)
+        
+        Duvida materia
+        UFMG e demais universidades fazem parte do AS RNP
+        BGP da RNP compartilha pro ativamente ou sob demanda? Overhead envolvido caso seja pro ativamente? Manda rota do router de borda de todas as UFs mesmo que se queira apenas uma?
+        """
+
+        #sock.settimeout(TIMEOUT)
         try:
-            sock.settimeout(TIMEOUT)
             ack_first_byte = sock.recv(1)
+            #sock.settimeout(None)
             if ack_first_byte:
                 break
         except socket.timeout:
             time.sleep(TIMEOUT)
+        except socket.error:
+            raise socket.error
 
     return ack_first_byte
 
@@ -137,81 +160,84 @@ def watcher(sock, output_fh, ack_first_byte=None):
     prev_buffer = ""  # Aux var for packet processing
 
     # Receive bytes from network and try to make a packet of them
-    while prev_header_field < 7:
+    try:
+        while prev_header_field < 7:
 
-        # Check if we are in the middle of an ACK processing because we just sent a packet or not
-        if ack_first_byte:
-            recv_byte = ack_first_byte
-            ack_first_byte = None
-        else:
-            recv_byte = sock.recv(1)
+            # Check if we are in the middle of an ACK processing because we just sent a packet or not
+            if ack_first_byte:
+                recv_byte = ack_first_byte
+                ack_first_byte = None
+            else:
+                recv_byte = sock.recv(1)
 
-        output_fh.write(recv_byte)
+            output_fh.write(recv_byte)
 
-        # Now were gonna look for two valid and consecutive sync fields - 4 bytes each
-        if prev_header_field in (0, 1):
-            if (prev_state == 0 and recv_byte == "\xdc") \
-                    or (prev_state == 1 and recv_byte == "\xc0") \
-                    or (prev_state == 2 and recv_byte == "#") \
-                    or (prev_state == 3 and recv_byte == "\xc2"):
+            # Now were gonna look for two valid and consecutive sync fields - 4 bytes each
+            if prev_header_field in (0, 1):
+                if (prev_state == 0 and recv_byte == "\xdc") \
+                        or (prev_state == 1 and recv_byte == "\xc0") \
+                        or (prev_state == 2 and recv_byte == "#") \
+                        or (prev_state == 3 and recv_byte == "\xc2"):
+                    prev_buffer += recv_byte
+                    if prev_state == 3:
+                        prev_header_field += 1
+                        prev_buffer = ""
+                        prev_state = 0
+                    else:
+                        prev_state += 1
+                else:
+                    prev_header_field = 0
+                    prev_state = 0
+
+            # Checksum and length fields - 2 bytes each
+            elif prev_header_field in (2, 3):
                 prev_buffer += recv_byte
-                if prev_state == 3:
+                if prev_state == 1:
+                    if prev_header_field == 2:
+                        recv_checksum = struct.unpack("!H", prev_buffer)[0]
+                    else:
+                        recv_length = struct.unpack("!H", prev_buffer)[0]
                     prev_header_field += 1
                     prev_buffer = ""
                     prev_state = 0
                 else:
                     prev_state += 1
-            else:
-                prev_header_field = 0
-                prev_state = 0
 
-        # Checksum and length fields - 2 bytes each
-        elif prev_header_field in (2, 3):
-            prev_buffer += recv_byte
-            if prev_state == 1:
-                if prev_header_field == 2:
-                    recv_checksum = struct.unpack("!H", prev_buffer)[0]
+            # Id and flags fields - 1 byte each
+            elif prev_header_field in (4, 5):
+                if prev_header_field == 4:
+                    recv_id = struct.unpack("!B", recv_byte)[0]
                 else:
-                    recv_length = struct.unpack("!H", prev_buffer)[0]
+                    recv_flags = struct.unpack("!B", recv_byte)[0]
+                    if recv_flags & 0x3f or (recv_flags & 0x80 and recv_flags & 0x40):
+                        logging.error("Invalid packet flags! Dropping packet and looking for a new one.")
+
+                        # Drop the packet and restart process
+                        prev_header_field = 0
+                        prev_state = 0
+                        prev_buffer = ""
+                    elif recv_length == 0:
+                        break
                 prev_header_field += 1
-                prev_buffer = ""
                 prev_state = 0
-            else:
-                prev_state += 1
 
-        # Id and flags fields - 1 byte each
-        elif prev_header_field in (4, 5):
-            if prev_header_field == 4:
-                recv_id = struct.unpack("!B", recv_byte)[0]
-            else:
-                recv_flags = struct.unpack("!B", recv_byte)[0]
-                if recv_flags & 0x3f or (recv_flags & 0x80 and recv_flags & 0x40):
-                    logging.error("Invalid packet flags! Dropping packet and looking for a new one.")
-
-                    # Drop the packet and restart process
-                    prev_header_field = 0
+            # Here we collect the data field (if any)
+            elif recv_length > 0:
+                if prev_state < recv_length:
+                    prev_buffer += recv_byte
+                    prev_state += 1
+                elif prev_state == recv_length:
+                    prev_header_field += 1
                     prev_state = 0
-                    prev_buffer = ""
-                elif recv_length == 0:
                     break
-            prev_header_field += 1
-            prev_state = 0
 
-        # Here we collect the data field (if any)
-        elif recv_length > 0:
-            if prev_state < recv_length:
-                prev_buffer += recv_byte
-                prev_state += 1
-            elif prev_state == recv_length:
-                prev_header_field += 1
-                prev_state = 0
-                break
-
-    return {"checksum": recv_checksum,
-            "length": recv_length,
-            "id": recv_id,
-            "flags": recv_flags,
-            "data": prev_buffer if recv_length > 0 else ""}
+        return {"checksum": recv_checksum,
+                "length": recv_length,
+                "id": recv_id,
+                "flags": recv_flags,
+                "data": prev_buffer if recv_length > 0 else ""}
+    except socket.error:
+        raise socket.error
 
 """
 | ===================================================================
@@ -226,9 +252,13 @@ def dccnet_service(sock, input_fh, output_fh, active=False):
     last_recv = {"packet": None, "checksum": None, "length": None, "id": None, "flags": None, "data": None}
     send_no_more = False
     recv_no_more = False
-    ack_first_byte = None
+    ack_first_byte = None  # If program was called as 'active', then we need to make the first move and send a packet
 
-    # If program was called as 'active', then we need to make the first move and send a packet
+
+    """
+    SUMIR COM ISSO AQUI, OS DOIS DEVEM COMEÇAR PELO RECV E ENVIAR DADOS SIMULTANEAMENTE
+    FLAG PARA SABER O ESTADO É UMA BOA: 'QUERO UM ACK OU QUERO DADOS?'
+    """
     if active:
         prev_buffer = input_fh.read(MTU)
         if not prev_buffer:
@@ -237,24 +267,36 @@ def dccnet_service(sock, input_fh, output_fh, active=False):
 
         # If the contents read are less in length then MTU, we won't bother reading the input file again
         send_no_more = True if not send_no_more and len(prev_buffer) < MTU else False
-        last_sent = {"length": len(prev_buffer), "id": 0, "flags": 0x40 if send_no_more else 0x00, "data": prev_buffer}
+        last_sent = {"length": len(prev_buffer), "id": 0, "flags": 0x40 if send_no_more else 0x00,
+                     "data": prev_buffer}
         last_sent["checksum"], header = pack(last_sent)
         last_sent["packet"] = header + last_sent["data"]
         prev_buffer = ""
 
-        ack_first_byte = interact(sock, last_sent["packet"])  # Send data
+        try:
+            ack_first_byte = interact(sock, last_sent["packet"])
+        except socket.error:
+            raise socket.error
 
         logging.info("[SEND][DATA][Checksum: {:5d}][Length: {:5d}][ID: {:1d}][Flags: {:3d}]".format(
             last_sent["checksum"], last_sent["length"], last_sent["id"], last_sent["flags"]))
 
+    """
+    SUMIR COM ISSO AQUI, OS DOIS DEVEM COMEÇAR PELO RECV E ENVIAR DADOS SIMULTANEAMENTE
+    FLAG PARA SABER O ESTADO É UMA BOA: 'QUERO UM ACK OU QUERO DADOS?'
+    """
+
     # Common behavior for both active and passive calls
     while True:
         if not recv_no_more:
-            if active:
-                recv_packet = watcher(sock, output_fh, ack_first_byte)
-            else:
-                recv_packet = watcher(sock, output_fh)
-            recv_no_more = True if recv_packet["flags"] == 0x40 else False
+            try:
+                if active:
+                    recv_packet = watcher(sock, output_fh, ack_first_byte)
+                else:
+                    recv_packet = watcher(sock, output_fh)
+                recv_no_more = True if recv_packet["flags"] == 0x40 else False
+            except socket.error:
+                raise socket.error
 
         # Now we validate the checksum before processing the packet
         recalc_checksum, decoded_packet = pack(recv_packet)
@@ -280,28 +322,34 @@ def dccnet_service(sock, input_fh, output_fh, active=False):
                             raise IOError
                     except IOError:
                         logging.warning("Input file is over. Will send an empty packet.")
-                        pass
+                        prev_buffer = ""
 
                     # If the contents read are less in length then MTU, we won't bother reading the input file again
                     send_no_more = True if not send_no_more and len(prev_buffer) < MTU else False
 
                     # Here we keep track of last sent packet
-                    last_sent = {"length": len(prev_buffer), "id": 1 if recv_packet["id"] == 0 else 0,
+                    last_sent = {"length": len(prev_buffer), "id": int(not recv_packet["id"]),
                                  "flags": 0x40 if send_no_more else 0x00, "data": prev_buffer}
                     last_sent["checksum"], header = pack(last_sent)
                     last_sent["packet"] = header + last_sent["data"]
 
-                    ack_first_byte = interact(sock, last_sent["packet"])  # Send new data
+                    try:
+                        ack_first_byte = interact(sock, last_sent["packet"])
+                    except socket.error:
+                        raise socket.error
                     logging.info("[SEND][DATA][Checksum: {:5d}][Length: {:5d}][ID: {:1d}][Flags: {:3d}]".format(
-                        recv_packet["checksum"], recv_packet["length"], recv_packet["id"], recv_packet["flags"]))
+                        last_sent["checksum"], last_sent["length"], last_sent["id"], last_sent["flags"]))
 
                 # Repeated ACK
                 elif recv_packet["id"] == last_recv["id"]:
                     logging.warning("An error probably ocurred, I've received this ACK yet. Retransmitting...")
 
-                    ack_first_byte = interact(sock, last_sent["packet"])
+                    try:
+                        ack_first_byte = interact(sock, last_sent["packet"])
+                    except socket.error:
+                        raise socket.error
                     logging.info("[RETR][ACK ][Checksum: {:5d}][Length: {:5d}][ID: {:1d}][Flags: {:3d}]".format(
-                        recv_packet["checksum"], recv_packet["length"], recv_packet["id"], recv_packet["flags"]))
+                        last_sent["checksum"], last_sent["length"], last_sent["id"], last_sent["flags"]))
 
             # Just some data, lets send an ACK
             else:
@@ -313,17 +361,27 @@ def dccnet_service(sock, input_fh, output_fh, active=False):
                     recv_packet["checksum"], recv_packet["length"], recv_packet["id"], recv_packet["flags"]))
 
                 # Here we keep track of last sent packet
-                last_sent = {"checksum": recalc_checksum, "length": 0, "id": last_recv["id"], "flags": 0x80, "data": ""}
-                last_sent["packet"] = pack(last_sent)[1]
+                last_sent = {"length": 0, "id": last_recv["id"], "flags": 0x80, "data": ""}
+                last_sent["checksum"], header = pack(last_sent)
+                last_sent["packet"] = header
 
-                ack_first_byte = interact(sock, last_sent["packet"])  # Send the ACK
+                try:
+                    ack_first_byte = interact(sock, last_sent["packet"])
+                except socket.error:
+                    raise socket.error
                 logging.info("[SEND][ACK ][Checksum: {:5d}][Length: {:5d}][ID: {:1d}][Flags: {:3d}]".format(
                     last_sent["checksum"], last_sent["length"], last_sent["id"], last_sent["flags"]))
+                if not active and recv_no_more:
+                    break
         else:
             logging.error("Wrong checksum field value! Dropping the packet.")
         prev_buffer = ""
 
-        if (active and send_no_more) or (not active and recv_no_more):
-            break
-
     logging.info("End of transmission!")
+
+"""except socket.error:
+    if e.errno != 10053:
+        print("{}: {}".format(e.errno, e.strerror))
+        raise socket.error
+    else:
+        pass"""
