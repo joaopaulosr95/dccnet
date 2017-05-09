@@ -10,8 +10,6 @@ Trabalho pratico 1
 """
 
 import sys
-import errno
-import time
 
 from util import *
 
@@ -42,8 +40,6 @@ if __name__ == "__main__":
             passive_port = int(sys.argv[2])
             inputPath = sys.argv[3]
             outputPath = sys.argv[4]
-
-        # Option not recornized
         else:
             IndexError
     except IndexError:
@@ -60,8 +56,7 @@ if __name__ == "__main__":
         logging.error("IOError({}): {}".format(e.errno, e.strerror))
         exit(1)
 
-    # Here we create our socket
-    dcc_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    dcc_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # Here we create our socket
 
     """
     Lets (finally) start playing. First the program will open input and output files. 
@@ -73,35 +68,23 @@ if __name__ == "__main__":
     if behavior == "active":
         dcc_sock.connect((passive_host, passive_port))
         logging.info("Connected to host {}:{}".format(passive_host, passive_port))
-
         dccnet_service(dcc_sock, input_fh, output_fh, True)
-
         logging.info("Closing connection with server {}:{}".format(passive_host, passive_port))
     else:
-
-        # Tells OS that sock is now hearing at host:port
-        dcc_sock.bind((passive_host, passive_port))
+        dcc_sock.bind((passive_host, passive_port))  # Tells OS that sock is now hearing at host:port
         logging.info("Socket binded at {}:{}".format(passive_host, passive_port))
-
-        # Tells how many connections our server will handle at once
-        dcc_sock.listen(MAX_CONN)
-
-        while True:
-            logging.info("Waiting for connections (max. {})".format(MAX_CONN))
-
-            # Lets connect to our first client
-            try:
-                client_sock, client_addr = dcc_sock.accept()
-                dcc_sock.settimeout(None)
-                logging.info("Connection established with {}:{}. Waiting for message...".format(
-                    client_addr[0], client_addr[1]))
-
-                dccnet_service(client_sock, input_fh, output_fh)
-            except socket.error as e:
-                logging.error("Incomplete transmission!")
-            finally:
-                logging.info("Closing connection with client {}:{}".format(client_addr[0], client_addr[1]))
-                client_sock.close()
+        dcc_sock.listen(MAX_CONN)  # Tells how many connections our server will handle at once
+        logging.info("Waiting for connections (max. {})".format(MAX_CONN))
+        try:
+            client_sock, client_addr = dcc_sock.accept()
+            logging.info("Connection established with {}:{}. Waiting for message...".format(
+                client_addr[0], client_addr[1]))
+            dccnet_service(client_sock, input_fh, output_fh)
+        except socket.error as e:
+            logging.error("Incomplete transmission!")
+        finally:
+            logging.info("Closing connection with client {}:{}".format(client_addr[0], client_addr[1]))
+            client_sock.close()
 
     logging.info("Closing socket at {}:{}".format(passive_host, passive_port))
     dcc_sock.close()
