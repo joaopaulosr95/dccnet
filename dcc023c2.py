@@ -69,8 +69,13 @@ if __name__ == "__main__":
 	if behavior == "active":
 		dcc_sock.connect((passive_host, passive_port))
 		logging.info("Connected to host {}:{}".format(passive_host, passive_port))
-		dccnet_service(dcc_sock, input_fh, output_fh)
-		logging.info("Closing connection with server {}:{}".format(passive_host, passive_port))
+		try:
+			dccnet_service(dcc_sock, input_fh, output_fh)
+		except socket.error as e:
+			if e.errno != errno.ECONNRESET:
+				logging.error("Incomplete transmission!")
+		finally:
+			logging.info("Closing connection with server {}:{}".format(passive_host, passive_port))
 	else:
 		dcc_sock.bind((passive_host, passive_port))  # Tells OS that sock is now hearing at host:port
 		logging.info("Socket binded at {}:{}".format(passive_host, passive_port))
