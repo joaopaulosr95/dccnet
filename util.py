@@ -36,7 +36,7 @@ First bit |   Last bit  | Meaning
 
 MAX_CONN = 1  # max connections our program can handle
 TIMEOUT = 1.0  # timeout in seconds before send same packet again
-MTU = 2 ** 16 - 1  # max bytes size for packet
+MTU = 2 ** 10 - 1  # max bytes size for packet
 HEADER_FORMAT = "!LLHHBB"  # byte format string for a header to be packed
 SYNC = "dcc023c2"  # sync header field "dc c0 23 c2"
 
@@ -228,15 +228,15 @@ def watcher(sock, output_fh, ack_first_byte=None):
 
 def dccnet_service(sock, input_fh, output_fh):
 	recv_thread = {
-		"recv_no_more": False,
+		"recv_no_more": False, # Has a packet with flag END been received?
 		"last_sent": {"checksum": None, "length": None, "id": None, "flags": None, "data": None, "packet": None},
 		"last_recv": {"checksum": None, "length": None, "id": 1, "flags": None, "data": None, "packet": None},
 	}
 	send_thread = {
-		"send_no_more": False,
+		"send_no_more": False, # Is there any more data in my input file?
 		"last_sent": {"checksum": None, "length": None, "id": 0, "flags": None, "data": None, "packet": None},
 		"last_recv": {"checksum": None, "length": None, "id": None, "flags": None, "data": None, "packet": None},
-		"waiting_ack": False
+		"waiting_ack": False # Did I just sent a data packet?
 	}
 
 	# As soon as we call dccnet_service we will send a packet to the other side
@@ -279,6 +279,11 @@ def dccnet_service(sock, input_fh, output_fh):
 	send_thread["waiting_ack"] = True
 
 	while True:
+
+		# If our threads have nothing more to do we can end transmission
+		if recv_thread["recv_no_more"] and (not send_thread["waiting_ack"] and send_thread["send_no_more"]):
+			logging.debug("Both threads have nothing more to do")
+			break
 
 		# Try to fetch some new data if threads are still able to receive it
 		sock.settimeout(TIMEOUT)
@@ -371,7 +376,6 @@ def dccnet_service(sock, input_fh, output_fh):
 					except socket.error:
 						raise socket.error
 
-
 			# Its just some data, lets send an ACK
 			elif not recv_thread["recv_no_more"] and not recv_packet["flags"] == 0x80:
 
@@ -407,10 +411,5 @@ def dccnet_service(sock, input_fh, output_fh):
 		else:
 			logging.error("Wrong checksum field value! Dropping the packet.")
 		prev_buffer = ""
-
-		# If our threads have nothing more to do we can end transmission
-		if recv_thread["recv_no_more"] and (not send_thread["waiting_ack"] and send_thread["send_no_more"]):
-			logging.debug("Both threads have nothing more to do")
-			break
 
 	logging.info("End of transmission!")

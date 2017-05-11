@@ -91,9 +91,9 @@ if __name__ == "__main__":
 				logging.error("Incomplete transmission!")
 		finally:
 			logging.info("Closing connection with client {}:{}".format(client_addr[0], client_addr[1]))
+			logging.info("Closing socket at {}:{}".format(passive_host, passive_port))
 			client_sock.close()
 
-	logging.info("Closing socket at {}:{}".format(passive_host, passive_port))
 	dcc_sock.close()
 	input_fh.close()
 	output_fh.close()  # End of program
