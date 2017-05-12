@@ -281,8 +281,8 @@ def dccnet_service(sock, input_fh, output_fh):
 	while True:
 
 		# If our threads have nothing more to do we can end transmission
-		if recv_thread["recv_no_more"] and (not send_thread["waiting_ack"] and send_thread["send_no_more"]):
-			logging.debug("Both threads have nothing more to do")
+		if recv_thread["recv_no_more"] and not send_thread["waiting_ack"] and send_thread["send_no_more"]:
+                        time.sleep(2.0)
 			break
 
 		# Try to fetch some new data if threads are still able to receive it
@@ -377,7 +377,7 @@ def dccnet_service(sock, input_fh, output_fh):
 						raise socket.error
 
 			# Its just some data, lets send an ACK
-			elif not recv_thread["recv_no_more"] and not recv_packet["flags"] == 0x80:
+			elif not recv_packet["flags"] == 0x80:
 
 				# Here we keep track of last received packet
 				recv_thread["last_recv"] = recv_packet

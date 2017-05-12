@@ -72,8 +72,7 @@ if __name__ == "__main__":
 		try:
 			dccnet_service(dcc_sock, input_fh, output_fh)
 		except socket.error as e:
-			if e.errno != errno.ECONNRESET:
-				logging.error("Incomplete transmission!")
+			logging.error("Incomplete transmission!")
 		finally:
 			logging.info("Closing connection with server {}:{}".format(passive_host, passive_port))
 	else:
@@ -87,8 +86,7 @@ if __name__ == "__main__":
 				client_addr[0], client_addr[1]))
 			dccnet_service(client_sock, input_fh, output_fh)
 		except socket.error as e:
-			if e.errno != errno.ECONNRESET:
-				logging.error("Incomplete transmission!")
+			logging.error("Incomplete transmission!")
 		finally:
 			logging.info("Closing connection with client {}:{}".format(client_addr[0], client_addr[1]))
 			logging.info("Closing socket at {}:{}".format(passive_host, passive_port))
@@ -96,4 +94,6 @@ if __name__ == "__main__":
 
 	dcc_sock.close()
 	input_fh.close()
-	output_fh.close()  # End of program
+	output_fh.close()
+
+# End of program
