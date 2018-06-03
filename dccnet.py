@@ -1,8 +1,7 @@
 #!/usr/bin/env python
 # coding=utf-8
 
-"""
-Copyright (c) 2017 Joao Paulo Bastos <joaopaulosr95@gmail.com>
+""" Copyright (c) 2017 Joao Paulo Bastos <joaopaulosr95@gmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -23,9 +22,7 @@ SOFTWARE.
 
 import sys
 import socket
-
 import logging
-
 from dccnet import utils
 
 """
@@ -59,7 +56,7 @@ if __name__ == "__main__":
         # Server perspective
         elif "-s" in sys.argv[1]:
             behavior = "passive"
-            passive_host = "150.164.6.45"  # socket.gethostbyname(socket.getfqdn())
+            passive_host = socket.gethostbyname(socket.getfqdn())
             passive_port = int(sys.argv[2])
             inputPath = sys.argv[3]
             outputPath = sys.argv[4]
@@ -81,7 +78,7 @@ if __name__ == "__main__":
 
     dcc_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # Here we create our socket
 
-    """ç
+    """
     Lets (finally) start playing. First the program will open input and output files.
     Based on behavior flag provided by user we now define if this program is gonna
     make the first move or not.

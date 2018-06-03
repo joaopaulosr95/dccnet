@@ -1,8 +1,7 @@
 #!/usr/bin/env python
 # coding=utf-8
 
-"""
-Copyright (c) 2017 Joao Paulo Bastos <joaopaulosr95@gmail.com>
+""" Copyright (c) 2017 Joao Paulo Bastos <joaopaulosr95@gmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -26,8 +25,7 @@ import socket
 import struct
 import time
 
-"""
-The above code implements DCCNET protocol
+""" The above code implements DCCNET protocol
 DCCNET packets are built using the following structure
 
 +-------------++-------------++---------++---------++-------+++-------+++-- ... --++++++++++
