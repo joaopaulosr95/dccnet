@@ -1,5 +1,16 @@
 # dccnet
 
+## usage
+
+- Start the server
+
+		python dccnet.py -s <port> <input_file> <output_file>
+
+
+- Start the client
+
+		python dccnet.py -c <server_ip>:<server_port> <input_file> <output_file>
+
 ## known issues
 
 |Issue|Fix|
